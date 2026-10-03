@@ -222,6 +222,47 @@ func TestOpenAIGatewayService_NativeResponsesBodyModificationPreservesHTMLChars(
 	require.NotContains(t, string(upstream.lastBody), `\\u0026`)
 }
 
+func TestOpenAIGatewayService_OAuthNativeResponsesInstructionContext(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	for _, tc := range []struct {
+		name         string
+		instructions string
+		input        string
+		expected     string
+	}{
+		{name: "missing", input: `[{"role":"user","content":"hello"}]`},
+		{name: "empty", instructions: `,"instructions":""`, input: `[{"role":"user","content":"hello"}]`},
+		{name: "caller supplied", instructions: `,"instructions":"  Real agent instructions.\n"`, input: `[{"role":"user","content":"hello"}]`, expected: "  Real agent instructions.\n"},
+		{name: "promoted system", input: `[{"role":"system","content":"Real system instructions."},{"role":"user","content":"hello"}]`, expected: "Real system instructions."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := []byte(fmt.Sprintf(`{"model":"gpt-5.6-luna","stream":false%s,"input":%s,"tools":[{"type":"function","name":"echo","parameters":{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}}]}`, tc.instructions, tc.input))
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+			c.Request.Header.Set("Content-Type", "application/json")
+			upstream := &httpUpstreamRecorder{err: errors.New("stop after capture")}
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+			account := &Account{
+				ID: 123, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+				Credentials: map[string]any{"access_token": "test-token", "chatgpt_account_id": "test-account"},
+				Status:      StatusActive, Schedulable: true,
+			}
+
+			_, err := svc.Forward(context.Background(), c, account, body)
+			require.Error(t, err)
+			require.NotEmpty(t, upstream.lastBody)
+			instructions := gjson.GetBytes(upstream.lastBody, "instructions")
+			require.Equal(t, gjson.String, instructions.Type)
+			require.Equal(t, tc.expected, instructions.String())
+			require.False(t, gjson.GetBytes(upstream.lastBody, "store").Bool())
+			require.True(t, gjson.GetBytes(upstream.lastBody, "stream").Bool())
+			require.Equal(t, "echo", gjson.GetBytes(upstream.lastBody, "tools.0.name").String())
+			require.Equal(t, "string", gjson.GetBytes(upstream.lastBody, "tools.0.parameters.properties.text.type").String())
+		})
+	}
+}
+
 func TestOpenAIGatewayService_OAuthMessagesBridgeDoesNotInjectDefaultInstructions(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

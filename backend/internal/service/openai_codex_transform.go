@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-
-	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 )
 
 var codexModelMap = map[string]string{
@@ -1389,16 +1387,11 @@ func extractPromptLikeInstructionsFromInput(reqBody map[string]any) string {
 	return strings.Join(texts, "\n\n")
 }
 
-// defaultCodexSynthInstructions 返回合成路径在 instructions 为空时应填入的默认提示词。
-//
-// 按 model 选择真实 Codex CLI 的 base instructions（codex 系→GPT-5-Codex，
-// gpt-5.2→GPT-5.2，gpt-5.1/gpt-5→GPT-5.1），使合成请求在提示词层面贴近真实 Codex 行为；
-// 若内嵌 prompt 意外为空，回退到最小占位符以保证字段非空。
-func defaultCodexSynthInstructions(model string) string {
-	if instructions := strings.TrimSpace(openai.CodexBaseInstructionsForModel(model)); instructions != "" {
-		return instructions
-	}
-	return "You are a helpful coding assistant."
+// defaultCodexSynthInstructions supplies the compatibility field without adding
+// model context. Codex accepts an empty string; callers own their instructions.
+// Keep model-specific base prompts in model discovery, not synthesized requests.
+func defaultCodexSynthInstructions(_ string) string {
+	return ""
 }
 
 // ensureCodexReasoningInclude 在请求带 reasoning 时补齐 include:["reasoning.encrypted_content"]。
@@ -1470,13 +1463,18 @@ func applyCodexClientMetadata(reqBody map[string]any, account *Account) bool {
 	}
 }
 
-// applyInstructions 处理 instructions 字段：仅在 instructions 为空时填充默认值。
+// applyInstructions preserves caller instructions and normalizes missing or
+// blank instructions to an empty compatibility field, without a synthetic prompt.
 func applyInstructions(reqBody map[string]any, isCodexCLI bool) bool {
 	if !isInstructionsEmpty(reqBody) {
 		return false
 	}
 	model, _ := reqBody["model"].(string)
-	reqBody["instructions"] = defaultCodexSynthInstructions(model)
+	instructions := defaultCodexSynthInstructions(model)
+	if existing, ok := reqBody["instructions"].(string); ok && existing == instructions {
+		return false
+	}
+	reqBody["instructions"] = instructions
 	return true
 }
 

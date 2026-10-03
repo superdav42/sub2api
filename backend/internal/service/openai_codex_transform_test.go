@@ -1462,8 +1462,8 @@ func TestApplyCodexOAuthTransform_CodexCLI_PreservesExistingInstructions(t *test
 	_ = result
 }
 
-func TestApplyCodexOAuthTransform_CodexCLI_SuppliesDefaultWhenEmpty(t *testing.T) {
-	// Codex CLI 场景：无 instructions 时补充默认值
+func TestApplyCodexOAuthTransform_CodexCLI_SuppliesEmptyCompatibilityField(t *testing.T) {
+	// Missing instructions must not introduce a coding-agent prompt.
 
 	reqBody := map[string]any{
 		"model": "gpt-5.1",
@@ -1474,11 +1474,11 @@ func TestApplyCodexOAuthTransform_CodexCLI_SuppliesDefaultWhenEmpty(t *testing.T
 
 	instructions, ok := reqBody["instructions"].(string)
 	require.True(t, ok)
-	require.NotEmpty(t, instructions)
+	require.Empty(t, instructions)
 	require.True(t, result.Modified)
 }
 
-func TestApplyCodexOAuthTransform_GPT55SuppliesModelSpecificInstructions(t *testing.T) {
+func TestApplyCodexOAuthTransform_GPT55DoesNotInjectModelSpecificInstructions(t *testing.T) {
 	reqBody := map[string]any{
 		"model":        "gpt-5.5",
 		"instructions": "   ",
@@ -1488,8 +1488,7 @@ func TestApplyCodexOAuthTransform_GPT55SuppliesModelSpecificInstructions(t *test
 
 	instructions, ok := reqBody["instructions"].(string)
 	require.True(t, ok)
-	require.Contains(t, instructions, "You are Codex, a coding agent based on GPT-5")
-	require.NotContains(t, instructions, "You are GPT-5.1 running in the Codex CLI")
+	require.Empty(t, instructions)
 	require.True(t, result.Modified)
 }
 
