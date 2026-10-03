@@ -1,7 +1,6 @@
 package service
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -58,11 +57,32 @@ func TestApplyCodexClientMetadata(t *testing.T) {
 	require.Equal(t, "dev-xyz", cm3["x-codex-installation-id"])
 }
 
-// defaultCodexSynthInstructions：按模型选用真实 Codex base prompt。
-func TestDefaultCodexSynthInstructionsModelAware(t *testing.T) {
-	require.True(t, strings.Contains(defaultCodexSynthInstructions("gpt-5-codex"), "You are Codex, based on GPT-5"))
-	require.True(t, strings.Contains(defaultCodexSynthInstructions("gpt-5.5"), "You are Codex, a coding agent based on GPT-5"))
-	require.False(t, strings.Contains(defaultCodexSynthInstructions("gpt-5.5"), "You are GPT-5.1 running in the Codex CLI"))
-	require.True(t, strings.Contains(defaultCodexSynthInstructions("gpt-5.2"), "You are GPT-5.2 running in the Codex CLI"))
-	require.True(t, strings.Contains(defaultCodexSynthInstructions("gpt-5.1"), "You are GPT-5.1 running in the Codex CLI"))
+func TestDefaultCodexSynthInstructionsDoesNotInjectModelPrompts(t *testing.T) {
+	for _, model := range []string{"gpt-5-codex", "gpt-5.1", "gpt-5.2", "gpt-5.5", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol", "unknown"} {
+		t.Run(model, func(t *testing.T) {
+			require.Equal(t, "", defaultCodexSynthInstructions(model))
+		})
+	}
+}
+
+func TestApplyInstructionsMinimalCompatibilityField(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		body     map[string]any
+		expected string
+		modified bool
+	}{
+		{name: "missing", body: map[string]any{}, modified: true},
+		{name: "null", body: map[string]any{"instructions": nil}, modified: true},
+		{name: "empty", body: map[string]any{"instructions": ""}},
+		{name: "whitespace", body: map[string]any{"instructions": " \n\t"}, modified: true},
+		{name: "invalid type", body: map[string]any{"instructions": 42}, modified: true},
+		{name: "caller instructions", body: map[string]any{"instructions": " \nFollow the real agent's instructions.\n "}, expected: " \nFollow the real agent's instructions.\n "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.modified, applyInstructions(tc.body, false))
+			require.Equal(t, tc.expected, tc.body["instructions"])
+			require.False(t, applyInstructions(tc.body, false), "normalization must be idempotent")
+		})
+	}
 }
