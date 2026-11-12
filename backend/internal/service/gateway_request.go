@@ -14,6 +14,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/tidwall/gjson"
@@ -645,6 +646,51 @@ func isClaude55SignedThinkingModel(model string) bool {
 // validateClaude55Request rejects settings that the upstream cannot honor.
 // Call before OAuth mimicry can remove tool_choice or alter thinking defaults.
 func validateClaude55Request(body []byte, model string) error {
+	return validateClaude55RequestOpts(body, model, false)
+}
+
+// validateClaude55CompatRequest is validateClaude55Request for requests that arrive
+// through OpenAI-compatible endpoints (Chat Completions / Responses). Those clients
+// routinely send temperature/top_p and cannot know which provider serves them, so the
+// sampling parameters are not rejected here; ResponsesToAnthropicRequest drops the
+// ones the model does not accept. The native /v1/messages path stays strict.
+func validateClaude55CompatRequest(body []byte, model string) error {
+	return validateClaude55RequestOpts(body, model, true)
+}
+
+// dropUnsupportedClaudeSamplingParams removes the sampling parameters that the Claude
+// 5.5-generation models do not accept from a request that arrived through an
+// OpenAI-compatible endpoint. Such clients send temperature/top_p as a matter of course
+// and cannot know which provider serves them (for example when a Claude account is the
+// fallback behind an OpenAI model alias), so dropping them is preferable to a 400.
+// ResponsesToAnthropicRequest keeps rejecting them for callers that skip this step.
+func dropUnsupportedClaudeSamplingParams(req *apicompat.ResponsesRequest, model string) {
+	if req == nil || !isClaude55SignedThinkingModel(model) {
+		return
+	}
+	switch {
+	case claude.IsSonnet55(model):
+		if req.Temperature != nil && *req.Temperature != 1 {
+			req.Temperature = nil
+		}
+		if req.TopP != nil && (*req.TopP < 0.99 || *req.TopP > 1) {
+			req.TopP = nil
+		}
+	case claude.IsHaiku55(model), claude.IsFable52(model), claude.IsMythos52(model):
+		if req.Temperature != nil && *req.Temperature != 1 {
+			req.Temperature = nil
+		}
+		if req.TopP != nil && *req.TopP != 0.99 {
+			req.TopP = nil
+		}
+		if req.Temperature != nil && req.TopP != nil {
+			// Individually valid but not accepted together; omit both.
+			req.Temperature, req.TopP = nil, nil
+		}
+	}
+}
+
+func validateClaude55RequestOpts(body []byte, model string, dropSamplingParams bool) error {
 	if !isClaude55SignedThinkingModel(model) {
 		return nil
 	}
@@ -705,7 +751,7 @@ func validateClaude55Request(body []byte, model string) error {
 			return fmt.Errorf("%s does not support forced tool_choice; use auto or none", modelName)
 		}
 	}
-	if isSonnet55 || isHaiku55 || isClaude52 {
+	if !dropSamplingParams && (isSonnet55 || isHaiku55 || isClaude52) {
 		if temperature := gjson.GetBytes(body, "temperature"); temperature.Exists() && (temperature.Type != gjson.Number || temperature.Float() != 1) {
 			return fmt.Errorf("%s does not support non-default temperature", modelName)
 		}
