@@ -676,7 +676,7 @@ func dropUnsupportedClaudeSamplingParams(req *apicompat.ResponsesRequest, model 
 		if req.TopP != nil && (*req.TopP < 0.99 || *req.TopP > 1) {
 			req.TopP = nil
 		}
-	case claude.IsHaiku55(model), claude.IsFable52(model), claude.IsMythos52(model):
+	case claude.IsHaiku55(model), claude.IsOpus55(model), claude.IsFable52(model), claude.IsMythos52(model):
 		if req.Temperature != nil && *req.Temperature != 1 {
 			req.Temperature = nil
 		}
