@@ -668,25 +668,18 @@ func dropUnsupportedClaudeSamplingParams(req *apicompat.ResponsesRequest, model 
 	if req == nil || !isClaude55SignedThinkingModel(model) {
 		return
 	}
-	switch {
-	case claude.IsSonnet55(model):
-		if req.Temperature != nil && *req.Temperature != 1 {
-			req.Temperature = nil
-		}
-		if req.TopP != nil && (*req.TopP < 0.99 || *req.TopP > 1) {
-			req.TopP = nil
-		}
-	case claude.IsHaiku55(model), claude.IsOpus55(model), claude.IsFable52(model), claude.IsMythos52(model):
-		if req.Temperature != nil && *req.Temperature != 1 {
-			req.Temperature = nil
-		}
-		if req.TopP != nil && *req.TopP != 0.99 {
-			req.TopP = nil
-		}
-		if req.Temperature != nil && req.TopP != nil {
-			// Individually valid but not accepted together; omit both.
-			req.Temperature, req.TopP = nil, nil
-		}
+	// Verified against the upstream API for Haiku, Sonnet and Opus 5.5: temperature is
+	// accepted only as 1, top_p only as 0.99 (0.9 and 1 are rejected, the latter as
+	// "deprecated"), and the two cannot be sent together. Clients commonly send
+	// top_p=1 or temperature plus top_p, so anything else is dropped.
+	if req.Temperature != nil && *req.Temperature != 1 {
+		req.Temperature = nil
+	}
+	if req.TopP != nil && *req.TopP != 0.99 {
+		req.TopP = nil
+	}
+	if req.Temperature != nil && req.TopP != nil {
+		req.Temperature, req.TopP = nil, nil
 	}
 }
 
